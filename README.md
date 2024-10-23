@@ -2,7 +2,7 @@
 
 ## 📚 Overview
 
-This project involves **Exploratory Data Analysis (EDA)** and was completed as part of my studies at the **University of Miguel Hernandez of Elche**. The project covers various analytical techniques such as **Principal Component Analysis (PCA)**, **clustering**, **factor analysis**, **missing data analysis**, and **outlier detection**. The code is provided in an RMarkdown file, and a detailed report is available in PDF format.
+This project involves **Exploratory Data Analysis (EDA)** and was completed as part of my studies at the **University of Miguel Hernandez of Elche** (that is why report is in spanish). The project covers various analytical techniques such as **Principal Component Analysis (PCA)**, **clustering**, **factor analysis**, **missing data analysis**, and **outlier detection**. The code is provided in an RMarkdown file, and a detailed report is available in PDF format.
 
 ## 🛠 Files and Directories
 
