@@ -1,0 +1,598 @@
+---
+title: "Entregable TEAI"
+author: "DORE Martin"
+date: "2024-01-20"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Librerias
+
+```{r}
+library(dplyr)
+library(naniar)
+library(simputation)
+library(ggplot2)
+library(outliers)
+library(EnvStats)
+library(patchwork)
+library(scatterplot3d)
+library(mvoutlier)
+library(factoextra)
+library(FactoMineR)
+library(corrplot)
+library(nFactors)
+library(parameters)
+library(GPArotation)
+library(psych)
+library(tidyverse)
+library(cluster)
+library(NbClust)
+library(mclust)
+library(dbscan)
+library(fpc)
+```
+
+
+# Ejercicio 1
+
+Realiza un estudio de valores faltantes y datos anómalos de la base de datos **ejercicio1.csv**.
+Interpreta los resultados obtenidos.
+
+## Importacion de datos
+
+```{r}
+library(readr)
+eje1 <- read_delim("ejercicio1.csv",
+                   delim = ";", escape_double = FALSE, trim_ws = TRUE)
+eje1 = as.data.frame(eje1)
+head(eje1)
+```
+
+```{r}
+str(eje1)
+```
+
+
+## Datos faltantes
+
+### Descripcion
+
+```{r}
+miss_var_summary(eje1)
+```
+Los datos faltantes afectan a todas las variables, especialmente a la V3.
+
+
+
+
+```{r}
+paste("proporcion de datos faltantes : ", prop_miss(eje1))
+```
+Hay menos del 5% de valores faltantes en total. En caso de que se desee utilizar este conjunto de datos para un estudio estadístico, se podría optar por eliminar los datos faltantes en lugar de reemplazarlos (ya sea por la media o mediante regresión).
+
+
+```{r}
+vis_miss(eje1)
+```
+
+
+```{r}
+gg_miss_upset(eje1)
+```
+
+Algunos individuos tienen datos faltantes para varias variables a la vez, como es el caso de 10 medidas que carecen de datos en V3/V4, por ejemplo.
+
+
+### Test MCAR
+
+Vamos a llevar a cabo una prueba para determinar si los datos faltantes están distribuidos completamente de manera aleatoria o si dependen de otros factores.
+
+```{r}
+mcar_test(eje1)
+```
+Para esta prueba, recordamos que la hipótesis nula (H0) es: "Los datos faltantes son MCAR" (Missing Completely At Random). Sin embargo, dado que tenemos un valor p de 0.643, no podemos rechazar la hipótesis nula. Es decir, según esta prueba, **los datos son MCAR**.
+
+### Imputacion por la media
+
+Porque tenemos poco valores faltantes y  que son MCAR, vamos a imputarlas por la media.
+
+```{r}
+eje1_imp = eje1 %>% 
+  bind_shadow(only_miss = T) %>% 
+  impute_mean_all()
+
+miss_var_summary(eje1_imp)
+eje1_imp = eje1_imp %>% 
+  select(V1,V2,V3,V4)
+```
+
+## Outliers
+
+```{r}
+g1 = ggplot(eje1_imp, aes(y=V1))+
+  geom_boxplot(outlier.colour = "red") 
+g2 = ggplot(eje1_imp, aes(y=V2))+
+  geom_boxplot(outlier.colour = "red")
+g3 = ggplot(eje1_imp, aes(y=V3))+
+  geom_boxplot(outlier.colour = "red")
+g4 = ggplot(eje1_imp, aes(y=V4))+
+  geom_boxplot(outlier.colour = "red")
+
+(g1|g2|g3|g4)
+```
+
+Podemos ver que en cada variables, hay datos outliers.
+
+Vamos a borrar todas las valores outliers
+
+
+```{r}
+eje1_imp_out <- eje1_imp
+
+# Loop through each column
+for (col in names(eje1_imp)) {
+  # Identify outliers
+  outliers <- boxplot(eje1_imp[[col]], plot=FALSE)$out
+  
+  # Store a copy of the dataframe
+  eje1_imp_out <- eje1_imp_out[-which(eje1_imp_out[[col]] %in% outliers), ]
+}
+```
+
+
+
+
+```{r}
+g1 = ggplot(eje1_imp_out, aes(y=V1))+
+  geom_boxplot(outlier.colour = "red") 
+g2 = ggplot(eje1_imp_out, aes(y=V2))+
+  geom_boxplot(outlier.colour = "red")
+g3 = ggplot(eje1_imp_out, aes(y=V3))+
+  geom_boxplot(outlier.colour = "red")
+g4 = ggplot(eje1_imp_out, aes(y=V4))+
+  geom_boxplot(outlier.colour = "red")
+
+(g1|g2|g3|g4)
+```
+Podemos ver que no hay más valores atípicos.
+
+Vamos a realizar pruebas estadísticas para asegurarnos de que no haya outliers:
+```{r}
+grubbs.test(eje1_imp_out$V1)
+grubbs.test(eje1_imp_out$V2)
+grubbs.test(eje1_imp_out$V3)
+grubbs.test(eje1_imp_out$V4)
+```
+
+
+
+
+Se puede observar que para todas las pruebas, el valor p es considerablemente mayor que 0.05, por lo tanto, no podemos rechazar las hipótesis alternativas. Es decir, ya no hay outliers en el conjunto de datos.
+
+
+
+# Ejercicio 2
+
+Se desea realizar un Análisis de Componentes Principales sobre los datos contenidos en el fichero ejercicio2.csv correspondiente a 28 clases de sujetos, la primera variable del dataset identifica al grupo y el resto de variables indican el número de horas que dedican a actividades relacionadas con: trabajo, transporte, hogar, cuidado de los hijos, viajes, aseo, comida, sueño, televisión y ocio.
+
+El código de las 28 clases de los sujetos es el siguiente:
+
+- HAUS: Hombres en activo estadounidenses
+- FALSO: Mujeres en activo de EE.UU.
+- FNAU: Mujeres no en activo en EE.UU.
+- HMUS: Hombres casados de EE.UU.
+- HCUS: Hombres solteros en EE.UU.
+- HAWE: Hombres en activo de los países occidentales.
+- FAWE: Mujeres en activo de países occidentales.
+- FNAW: Mujeres no en activo de países occidentales.
+- HMWE: Hombres casados de países occidentales.
+- FMWE: Mujeres casadas de países occidentales.
+- HCWE: Hombres casados en países occidentales.
+- HAES: Hombres en activo de Europa del Este.
+- FAES: Mujeres en activo de Europa del Este.
+- FNAE: Mujeres no en activo de Europa del Este.
+- HMES: Hombres casados de Europa del Este.
+- FMES: Mujeres casadas de Europa del Este.
+- HCES: Hombres solteros de Europa del Este.
+- HAYO: Hombres en activo de Yugoslavia.
+- FAYO: Mujeres en activo de Yugoslavia.
+- FNAY: Mujeres no en activo de Yugoslavia.
+- HMYO: Hombres casados de Yugoslavia.
+- FMYO: Mujeres casadas de Yugoslavia.
+- HCYO: Hombres solteros de Yugoslavia.
+- FCUS: Mujeres solteras en EE.UU.
+- FCWE: Mujeres solteras de países occidentales.
+- FCES: Mujeres solteras de Europa del Este.
+- FCYO: Mujeres solteras de Yugoslavia.
+
+El objetivo del estudio es realizar una reducción de variables o agrupación para comparar el tiempo de dedicación a las actividades. Un caso de la base de datos, contiene el número de horas que los sujetos del grupo i han dedicado por término medio a la actividad j. Realiza todos los pasos necesarios para la correcta interpretación de los datos.
+
+
+## Importacion de datos
+
+```{r}
+eje2 <- read_delim("ejercicio2.csv", 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE)
+eje2 = as.data.frame(eje2)
+str(eje2)
+```
+
+```{r}
+# borramos la primera columna 
+data2 = eje2[,2:10]
+row.names(data2) = eje2$grupo
+```
+
+```{r}
+R = cor(data2)
+corrplot(R, type = "lower", method = "square", outline = T, t1.col = "black")
+```
+
+Se puede observar que hay bastantes correlaciones entre nuestras variables, lo que indica que llevar a cabo una reducción de dimensiones (como un Análisis de Componentes Principales, ACP) es una buena opción para abordar el problema.
+
+## ACP 
+```{r}
+pca = PCA(data2, graph = F, scale.unit = T)
+fviz_eig(pca, addlabels = T)
+```
+
+Se puede observar que al conservar solo las componentes 1 y 2, se retiene el 75% de la información de nuestros datos.
+
+```{r}
+fviz_eig(pca, choice="eigenvalue", addlabels=T) +
+  geom_hline(yintercept = 1, linetype=2, color="dark green")
+```
+Se puede observar también que las tres primeras componentes tienen valores propios superiores a 1. Según el criterio de elección (porcentaje de información o valores propios >1), se puede optar por una o dos componentes.   Dado que el 75% es relativamente importante y que 1.3 está apenas por encima de 1, tomamos la decisión de conservar solo 2 componentes en el resto de nuestro análisis.
+
+
+```{r}
+pca$var$cor[,1:2]
+```
+Los resultados del Análisis de Componentes Principales (ACP) indican los coeficientes de cada variable en las dos primeras dimensiones (Dim.1 y Dim.2). Las cifras en estas dimensiones representan los pesos asociados a cada variable.
+
+Interpretación de los resultados:
+
+- **Dim.1:** Las variables más fuertemente influenciada spor Dim.1 son "trabajo" y "transporte", con un coeficiente negativo importante. Esto sugiere que Dim.1 está asociada con una disminución del tiempo dedicado al trabajo y al transporte. Además, los coeficientes de "hogar" y "cuidnin" son positivamente elevados, lo que significa que la dimensión 1 está vinculada a una cantidad significativa de tiempo dedicado al cuidado de la casa (también podemos ver que el tiempo dedicado a cocinar y a dormir son importantes). 
+
+- **Dim.2:** La variable más fuertemente influenciada por Dim.2 es "aseo", con un coeficiente positivo elevado. Esto sugiere que Dim.2 está asociada con un aumento del tiempo dedicado a la higiene. Otras variables influenciadas positivamente incluyen "viajes" y "telev". Además, el tiempo dedicado a comer y a dormir está negativamente correlacionado. Por tanto, la dimensión 2 se asocia con mucho tiempo dedicado a aseos y viajes y muy poco a comer y dormir. 
+
+
+
+
+```{r}
+fviz_pca_var(pca)
+```
+Se pueden observar dos grupos en las variables: 
+
+- En el lado izquierdo, aquellos que pasan mucho tiempo en transporte y trabajo.
+- En el lado derecho, aquellos que pasan mucho tiempo realizando tareas del hogar y descansando.  
+
+Además, las variables que están "hacia arriba" indican que se pasa mucho tiempo viendo televisión, viajando o cuidando del bienestar personal.
+
+```{r}
+fviz_pca_ind(pca, repel = T)
+```
+
+
+Se puede observar de manera muy general que hay dos grupos que se forman para los individuos:
+
+- En el lado derecho, los hombres que trabajan. (H...)
+- En el lado izquierdo, las mujeres que se ocupan de la casa. (F...)
+
+Se puede observar que, para las mujeres, cuanto más activas son, o cuanda son de un país desarrollado o viven solas, más tiempo dedican al trabajo (se encuentran un poco más a la izquierda en el gráfico). Mientras que para los hombres, los no activos no necesariamente participan más en las tareas del hogar.  
+  
+Se puede observar, además, que en el aspecto de arriba/abajo, los países más pobres están abajo, mientras que los países más desarrollados están arriba. Esto significa que los países más desarrollados pueden permitirse más viajes y pasar más tiempo frente al televisor, mientras que los países menos desarrollados no tienen esa oportunidad.
+
+
+
+# Ejercicio 3
+
+Los datos del fichero ejercicio3.csv contienen variables antropométricas y de aptitud física que
+se hicieron a 50 hombres del departamento de policía de una gran ciudad metropolitana. Las
+variables incluyen el tiempo de reacción en segundos a un estímulo visual (est_visual), la altura
+en centímetros (altura), peso en kilogramos (peso), anchura de hombros en centímetros
+(hombros), anchura pélvica en centímetros (pelvis), anchura de pecho en centímetros (pecho),
+pliegues cutáneos del muslo en milímetros (piernas), el pulso (pulso), la presión arterial
+diastólica (presion_art), mandíbula (mandibula), capacidad respiratoria en litros (cap_resp)
+rrecuencia del pulso después de 5 minutos de recuperación (recuperacion), velocidad máxima
+(velocidad), tiempo de resistencia en minutos (resistencia), grasa corporal (grasa_corp).  
+  
+  
+El objetivo de este estudio es realizar una reducción de variables mediante un Análisis Factorial
+y agrupar las variables originales en unos pocos factores que sean interpretables. Realiza todos
+los pasos necesarios para realizar un Análisis Factorial Exploratorio y la correcta interpretación
+de los datos
+
+## Importacion de datos
+
+```{r}
+eje3 <- read_delim("ejercicio3.csv", 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE)
+eje3 = as.data.frame(eje3)
+str(eje3)
+```
+
+```{r}
+# borramos la primera columna 
+data3 = eje3[,2:16]
+row.names(data3) = eje2$id
+```
+
+
+## Analisis Factorial
+
+```{r}
+R = cor(data3)
+corrplot(R, type = "lower", method = "square", outline = T)
+```
+Se puede observar que hay bastantes correlaciones entre nuestras variables, lo que indica que llevar a cabo una reducción de dimensiones (como un Análisis Factorial) es una buena opción para abordar el problema.
+
+
+```{r}
+cortest.bartlett(R,n=20)
+```
+
+La p-value es lo suficientemente baja según la prueba de Bartlett, lo que indica que los datos están lo suficientemente correlacionados como para realizar un análisis factorial.  
+Buscamos el numero de factors que debemos elegir.
+
+```{r}
+(result_nfactors = n_factors(data3, type = "FA"))
+```
+```{r}
+plot(result_nfactors)
+```
+
+Los resultados de los diferentes tests indican que podemos elegir entre 1 y 2 factors. Para que sea mas interpretable, vamos a elegir 2 factors.
+
+### Sin rotacion
+
+```{r}
+modelo1 = fa(data3, rotate = "none", nfactors = 2, fm = "minres")
+fa.diagram(modelo1)
+```
+```{r}
+modelo1$communality
+```
+### Varimax 
+```{r}
+modelo2 = fa(data3, rotate = "varimax", nfactors = 2, fm = "minres")
+fa.diagram(modelo2)
+```
+
+```{r}
+modelo2$communality
+```
+
+
+### Oblimin
+
+```{r}
+modelo3= fa(data3, rotate = "oblimin", nfactors = 2, fm = "minres")
+fa.diagram(modelo3)
+```
+
+```{r}
+modelo3$communality
+```
+
+En todos los modelos, las variables **pression_art** y **est_visual** no importan.  
+Podemos ver que no hay bastante deferencias entre los modelos : vamos a elegir el mas simple (sin rotacion).
+
+### Interpretacion
+
+```{r}
+biplot(modelo1, cutl=.4)
+```
+
+- El factor 1 influye en las variables:
+  + peso, grasa_corp, pecho, altura, hombros, piernas, pelvis y cap_resp (+)
+  - mandíbula, resistencia (-)
+
+Esto nos indica que un individuo proyectado en el biplot "hacia la derecha" será bastante alto y robusto (ancho de pecho y pelvis + peso elevado) y tendrá una mandíbula y resistencia limitadas. Inversamente, cuanto más se proyecte un individuo hacia la izquierda, será más pequeño, ligero y resistente.
+
+- El factor 2 influye en las variables:
+  + recuperacion, pulso (+)
+  - velocidad (-)
+  
+
+Esto nos indica que un individuo proyectado en el biplot "hacia arriba" tendrá un pulso muy alto y un tiempo de recuperación prolongado, así como una velocidad baja. Por lo tanto, será poco atlético. Por el contrario, cuanto más se proyecte un individuo "hacia abajo", será más rápido y resistente.
+
+
+Vamos a imprimir solamente los individuos para determinar grupos:
+
+```{r}
+biplot(modelo1, col = "blue", arrows = F, labels = rownames(data3), cutl = 1)
+```
+
+
+| Groupe | Individuos                  | Características                       |
+|--------|-----------------------------|---------------------------------------|
+| Grupo 1 | 19, 15, 36                 | Grandes/robustos y poco deportivos    |
+| Grupo 2 | 3, 40, 28, 14, 22, ..., 10, 2 | Pequeños y nivel adecuado en deporte |
+| Grupo 3 | 30, 20, 29, 33, 7           | Pequeños y muy atléticos              |
+| Grupo 4 | 46, 9, 18, 37, ...           | Altos y deportistas                   |
+
+
+
+
+
+
+# Ejercicio 4
+
+El objetivo de este ejercicio es clasificar los países utilizando factores socioeconómicos y
+sanitarios que determinen el desarrollo global del país. Se tiene que decidir qué países están en
+la mayor necesidad de ayuda. Por lo tanto, se pretende clasificar los países utilizando algunos
+indicadores presentes en la base de datos del fichero ejercicio4.csv.
+
+Realiza un Análisis Clúster a la base de datos que contenga todos los pasos necesarios para la correcta interpretación de
+los datos.
+
+**Descripción de las variables de la base de datos:**
+- country: Nombre del país
+- child_mort: Muerte de niños menores de 5 años por cada 1000 nacidos vivos
+- exports: Exportaciones de bienes y servicios per cápita. En porcentaje del PIB per cápita.
+- health: Gasto sanitario total per cápita. En porcentaje del PIB per cápita
+- imports: Importaciones de bienes y servicios per cápita. En porcentaje del PIB per cápita
+- Income: Renta neta por persona
+- inflation: Medida de la tasa de crecimiento anual del PIB total
+- life_expec: Número medio de años que viviría un recién nacido si se mantuvieran las pautas
+actuales de mortalidad
+- total_fer: Número de hijos que nacerían de cada mujer si se mantienen las actuales tasas de
+fecundidad por edad.
+- gdpp: PIB per cápita. Calculado como el PIB total dividido por la población total.
+
+
+## Importacion de datos
+
+
+```{r}
+eje4 <- read_delim("ejercicio4.csv", 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE)
+eje4 = as.data.frame(eje4)
+str(eje4)
+```
+```{r}
+data4 = eje4[,1:10]
+data4$child_mort = as.numeric(data4$child_mort)
+data4 = na.omit(data4)
+data4_scale = scale(data4[,2:10])
+# row.names(data4) = eje4$country
+```
+
+## Clustering 
+
+```{r}
+fviz_nbclust(data4_scale, kmeans, method = "wss")
+```
+La "método del codo" no nos permite elegir directamente el número de clústeres.
+
+```{r}
+data4_scale = as.data.frame(data4_scale)
+n_clust = n_clusters(data4_scale, package = c("easystats", "NbClust", "mclust"),
+                     standardize = T)
+plot(n_clust)
+```
+Vamos a elegir 3 clusters y hacer un kmeans sobre nuestros datos.
+
+
+```{r}
+result_k3 = kmeans(data4_scale, centers = 3, nstart = 25)
+```
+
+```{r}
+data4 %>% 
+  mutate(cluster = result_k3$cluster) %>% 
+  group_by(cluster) %>% 
+  summarize_all("mean")
+```
+
+
+```{r}
+data4_scale$cluster = as.factor(result_k3$cluster)
+data.long = gather(data4_scale, variable, valor, child_mort:gdpp, factor_key = TRUE)
+```
+
+
+
+```{r}
+ggplot(data.long, aes(as.factor(variable), y=valor, group = cluster, colour = cluster)) + 
+  stat_summary(fun = mean, geom = "pointrange", size = 1)+
+  stat_summary(geom="line", )+
+  geom_point(aes(shape = cluster))+
+  theme(axis.text.x = element_text(angle = 90))
+```
+### Cluster 2
+
+El clúster 2 está asociado a un alto valor de child_mort y total_fer. También se caracteriza por bajos valores en exports, health, imports, gdpp, income y life_expec.
+Estos son los países más pobres, que tienen muchos hijos por mujer para hacer frente a la alta mortalidad infantil y la baja esperanza de vida. Además, estos países no participan mucho en el comercio internacional (pocas importaciones/exportaciones), lo que resulta en bajos ingresos y un PIB muy bajo.  
+Es el caso de los siguientes países:
+
+
+```{r}
+data4$country[data4_scale$cluster==2]
+```
+### Cluster 1
+
+El clúster 1 está asociado a un bajo valor de child_mort, inflación y total_fer, así como a valores altos en exports, imports, gdpp, health y life_expect.
+Estos son los países más ricos, donde hay menos hijos por mujer, ya que la esperanza de vida es alta y la mortalidad infantil muy baja. Además, estos países son ricos porque tienen altos ingresos y baja inflación al estar involucrados en el comercio internacional. Estos países más desarrollados tienen un PIB per cápita muy alto.
+
+
+```{r}
+data4$country[data4_scale$cluster==1]
+```
+### Cluster 3
+
+En el clúster 3, se encuentran todos los demás países, que tienen valores intermedios en todas las variables. Estos son los países emergentes: son más desarrollados y seguros que los países más pobres, pero aún no han alcanzado el nivel de los países más ricos.
+
+
+```{r}
+data4$country[data4_scale$cluster==3]
+```
+# Ejercicio 5
+
+## Importacion de datos
+
+
+```{r}
+data("DS3")
+head(DS3)
+```
+## Clustering
+
+```{r}
+ggplot(data = DS3, aes(x=X, y=Y))+
+  geom_point()+
+  theme_classic()
+```
+
+Podemos ver que los datos tienen un formato muy especial : podemos esperar que las técnicas de agrupación de tipo kmeans no funcionen muy bien.
+
+### Kmeans
+
+Graficamente, podemos ver que hay 6 grupos, vamos a probar el kmeans con 6 grupos.
+
+
+```{r}
+result_k6 = kmeans(DS3, centers = 6, nstart = 25)
+fviz_cluster(result_k6, data = DS3, geom = "point", ellipse = F)+
+  theme_classic()
+```
+Se puede observar que los agrupamientos son "lógicos" pero no respetan la particularidad de los datos: el k-means no es adecuado para este tipo de datos.
+
+### DBSCAN
+Vamos a hacer un knn antes para conocer el $ε$ adecuado.
+
+```{r}
+kNNdistplot(DS3, k=6)
+abline(h=8.5, col = "red")
+```
+Elegimos :  $ε=8.5$.
+
+```{r}
+dbscan_clusters = fpc::dbscan(data = DS3,
+                             eps = 8.5,
+                             MinPts = 15)
+fviz_cluster(dbscan_clusters, data = DS3, geom = "point", ellipse = F, show.clust.cent = F)+
+  theme_classic()
+```
+Se puede observar que el agrupamiento ha funcionado perfectamente y el algoritmo DBSCAN ha encontrado automáticamente los 6 grupos.
+
+
+### HDBSCAN
+
+```{r}
+hdbscan_clusters = hdbscan(DS3, minPts = 20)
+DS3_clust = DS3
+DS3_clust $clust_hdbscan = hdbscan_clusters$cluster
+ggplot(DS3_clust, aes(x=X, y=Y, color = as.factor(clust_hdbscan)))+
+  geom_point()+
+  labs(color = "Cluster")+
+  theme_classic()
+```
+
+HDBSCAN también ha funcionado a la perfección.
+
